@@ -1,6 +1,9 @@
 const express = require('express');
 const Item = require('../models/Item');
+const Notificacao = require('../models/Notificacao');
 const verificarToken = require('../middlewares/verificarToken');
+
+const STATUS_ENCONTRADO = ['encontrado', 'recuperado'];
 
 const router = express.Router();
 
@@ -73,6 +76,18 @@ router.put('/:id', verificarToken, async (req, res) => {
     }
 
     const item = await Item.atualizar(req.params.id, req.body);
+
+    if (
+      req.body.status_item &&
+      STATUS_ENCONTRADO.includes(req.body.status_item) &&
+      !STATUS_ENCONTRADO.includes(itemExistente.status_item)
+    ) {
+      await Notificacao.criar({
+        mensagem: `Seu item "${item.nome}" foi marcado como ${req.body.status_item}.`,
+        id_usuario: itemExistente.id_usuario,
+      });
+    }
+
     return res.json({ mensagem: 'Item atualizado com sucesso.', item });
   } catch (erro) {
     console.error('Erro ao atualizar item:', erro);
