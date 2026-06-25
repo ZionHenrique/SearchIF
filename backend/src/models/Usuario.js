@@ -12,8 +12,18 @@ const TABELAS_TIPO = {
 async function buscarPorEmail(email) {
   const [rows] = await pool.query(
     'SELECT id, nome, email, senha, telefone, tipo_usuario FROM usuario WHERE email = ?',
-    [email]
+    [email.trim()]
   );
+  return rows[0] || null;
+}
+
+async function buscarPorMatricula(tipoUsuario, matricula) {
+  const tabela = TABELAS_TIPO[tipoUsuario];
+  if (!tabela) return null;
+
+  const [rows] = await pool.query(`SELECT id_usuario FROM ${tabela} WHERE matricula = ?`, [
+    matricula.trim(),
+  ]);
   return rows[0] || null;
 }
 
@@ -138,6 +148,7 @@ async function compararSenha(senhaInformada, senhaHash) {
 
 module.exports = {
   buscarPorEmail,
+  buscarPorMatricula,
   buscarPorId,
   criar,
   atualizar,

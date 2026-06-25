@@ -1,190 +1,286 @@
 # Relatório — Backend SearchIF
 
-## O que foi implementado
+## Entregas do projeto
 
-**Stack:** Node.js + Express + MySQL (`mysql2`) + JWT + bcrypt + multer + node-cron
+| Entrega | Descrição | Status |
+|---------|-----------|--------|
+| **ENTREGA01** | Scripts SQL + Configuração do Ambiente | Concluída |
+| **ENTREGA02** | Models + Controllers (Lógica do Sistema) | Concluída |
+| **ENTREGA03** | Rotas + Integração Completa da API | Concluída |
+| **ENTREGA04** | Regras de Negócio + Validações | Concluída |
+
+---
+
+## ENTREGA01 — Scripts SQL + Configuração do Ambiente
+
+### Script `bd.sql`
+
+Script idempotente que recria o banco completo:
+
+- Charset `utf8mb4`
+- Tabelas: `usuario`, `discente`, `docente`, `servidor`, `administrador`, `categoria`, `tag`, `item`, `item_tag`, `postagem`, `comentario`, `notificacao`
+- Constraints `UNIQUE` (e-mail, matrícula, categoria, postagem por item+fórum)
+- Foreign keys com `ON DELETE CASCADE` / `SET NULL`
+- Índices para buscas por status, categoria, fórum e data
+- Campos de período de perda: `data_perda_inicio`, `data_perda_fim`
+- Tags vinculadas a itens (UC19)
+- Seed de 6 categorias e 5 tags
+
+### Configuração
+
+```bash
+mysql -u root -p < bd.sql
+cd backend && copy .env.example .env
+npm install && npm run dev
+```
+
+Arquivos de ambiente:
+
+- `backend/.env.example` — template versionado no GitHub
+- `backend/.env` — credenciais locais (ignorado pelo `.gitignore`)
+- `.gitignore` na raiz — protege `.env` e `node_modules`
+
+---
+
+## ENTREGA02 — Models + Controllers
+
+### Models (consultas ao banco)
+
+| Model | Responsabilidade |
+|-------|------------------|
+| `Usuario.js` | CRUD usuário + tabelas filhas por tipo |
+| `Item.js` | CRUD item + tags + filtros |
+| `Categoria.js` | CRUD categoria |
+| `Tag.js` | Listagem e vínculo item↔tag |
+| `Postagem.js` | CRUD postagem + limpeza RNF5 |
+| `Comentario.js` | CRUD comentário |
+| `Notificacao.js` | Listagem e marcação de leitura |
+
+### Controllers (lógica + retorno JSON)
+
+| Controller | Métodos |
+|------------|---------|
+| `usuarioController` | cadastrar, login, obterPerfil, atualizarPerfil |
+| `itemController` | listar, buscarPorId, criar, atualizar, excluir |
+| `categoriaController` | listar, buscarPorId, criar, atualizar, excluir |
+| `postagemController` | listar, buscarPorId, criar, atualizar, excluir, comentários |
+| `comentarioController` | excluir |
+| `notificacaoController` | listar, marcarVisualizada, marcarTodasVisualizadas |
+| `uploadController` | enviarImagem, listarTags |
+
+Todos os retornos são JSON padronizados via `utils/respostas.js`.
+
+---
+
+## ENTREGA03 — Rotas + Integração Completa da API
+
+### Stack
+
+Node.js + Express + MySQL (`mysql2`) + JWT + bcrypt + multer + node-cron
 
 ### Estrutura
 
 ```
-backend/
-├── .env / .env.example
-├── package.json
-├── uploads/                  # imagens enviadas
-└── src/
-    ├── server.js
-    ├── database/conexao.js
-    ├── jobs/limpezaPostagens.js
-    ├── middlewares/
-    │   ├── verificarToken.js
-    │   ├── verificarAdmin.js
-    │   └── upload.js
-    ├── models/
-    │   ├── Usuario.js
-    │   ├── Item.js
-    │   ├── Categoria.js
-    │   ├── Postagem.js
-    │   ├── Comentario.js
-    │   └── Notificacao.js
-    ├── routes/
-    │   ├── usuarios.js
-    │   ├── itens.js
-    │   ├── categorias.js
-    │   ├── postagens.js
-    │   ├── comentarios.js
-    │   ├── notificacoes.js
-    │   └── upload.js
-    └── utils/validacoes.js
+backend/src/
+├── server.js
+├── database/conexao.js
+├── controllers/
+├── models/
+├── routes/
+├── middlewares/
+│   ├── verificarToken.js
+│   ├── verificarAdmin.js
+│   ├── upload.js
+│   ├── asyncHandler.js
+│   └── tratarErros.js
+├── utils/
+│   ├── validacoes.js
+│   ├── regrasNegocio.js
+│   └── respostas.js
+└── jobs/limpezaPostagens.js
 ```
 
----
+### Endpoints — GET, POST, PUT, DELETE
 
-## Endpoints disponíveis
+#### Saúde
 
-### Saúde e autenticação
+| Método | Rota | Auth |
+|--------|------|------|
+| GET | `/health` | — |
 
-| Método | Rota | Auth | Descrição |
-|--------|------|------|-----------|
-| `GET` | `/health` | — | Verifica API e banco |
-| `POST` | `/api/usuarios/cadastro` | — | Cadastro (RF1, RF3–RF5) |
-| `POST` | `/api/usuarios/login` | — | Login (RF2) |
-| `GET` | `/api/usuarios/perfil` | Token | Perfil do usuário |
-| `PUT` | `/api/usuarios/perfil` | Token | Editar perfil (RF20) |
-
-### Itens
+#### Usuários
 
 | Método | Rota | Auth | Descrição |
 |--------|------|------|-----------|
-| `GET` | `/api/itens` | — | Listar com filtros (RF12, RF15) |
-| `GET` | `/api/itens/:id` | — | Detalhe do item (RF18) |
-| `POST` | `/api/itens` | Token | Criar item (RF11, RF13) |
-| `PUT` | `/api/itens/:id` | Token | Atualizar item + notificação se encontrado (RF19) |
-| `DELETE` | `/api/itens/:id` | Token | Excluir item recuperado (RF16) |
+| POST | `/api/usuarios/cadastro` | — | Cadastro |
+| POST | `/api/usuarios/login` | — | Login |
+| GET | `/api/usuarios/perfil` | Token | Perfil |
+| PUT | `/api/usuarios/perfil` | Token | Editar perfil |
 
-**Filtros em `GET /api/itens`:** `?categoria=`, `?nome=`, `?status=`, `?data_inicio=`, `?data_fim=`, `?id_usuario=`
-
-### Categorias
+#### Itens
 
 | Método | Rota | Auth | Descrição |
 |--------|------|------|-----------|
-| `GET` | `/api/categorias` | — | Listar categorias |
-| `GET` | `/api/categorias/:id` | — | Buscar categoria |
-| `POST` | `/api/categorias` | Admin | Criar categoria (RF11) |
-| `PUT` | `/api/categorias/:id` | Admin | Atualizar categoria |
-| `DELETE` | `/api/categorias/:id` | Admin | Excluir categoria |
+| GET | `/api/itens` | — | Listar (filtros) |
+| GET | `/api/itens/:id` | — | Detalhe + tags |
+| POST | `/api/itens` | Token | Criar |
+| PUT | `/api/itens/:id` | Token | Atualizar |
+| DELETE | `/api/itens/:id` | Token | Excluir |
 
-### Fórum — Postagens (RF7–RF10)
+**Filtros:** `?categoria=`, `?nome=`, `?status=`, `?data_inicio=`, `?data_fim=`, `?id_usuario=`
 
-| Método | Rota | Auth | Descrição |
-|--------|------|------|-----------|
-| `GET` | `/api/postagens` | — | Listar fórum achados/pedidos |
-| `GET` | `/api/postagens/:id` | — | Detalhe + comentários (RF10) |
-| `POST` | `/api/postagens` | Token | Criar postagem |
-| `PUT` | `/api/postagens/:id` | Token | Editar postagem |
-| `DELETE` | `/api/postagens/:id` | Token | Excluir postagem |
-| `GET` | `/api/postagens/:id/comentarios` | — | Listar comentários (UC17) |
-| `POST` | `/api/postagens/:id/comentarios` | Token | Adicionar comentário |
-
-**Filtros em `GET /api/postagens`:** `?tipo_forum=achados|pedidos`, `?categoria=`, `?data_inicio=`, `?data_fim=`, `?id_usuario=`
-
-**Detalhe da postagem retorna:** título, tipo do fórum, data, nome do autor, descrição do item, categoria, local encontrado, data de perda, imagem e lista de comentários.
-
-### Comentários
+#### Categorias
 
 | Método | Rota | Auth | Descrição |
 |--------|------|------|-----------|
-| `DELETE` | `/api/comentarios/:id` | Token | Excluir próprio comentário |
+| GET | `/api/categorias` | — | Listar |
+| GET | `/api/categorias/:id` | — | Buscar |
+| POST | `/api/categorias` | Admin | Criar |
+| PUT | `/api/categorias/:id` | Admin | Atualizar |
+| DELETE | `/api/categorias/:id` | Admin | Excluir |
 
-### Notificações (RF19)
-
-| Método | Rota | Auth | Descrição |
-|--------|------|------|-----------|
-| `GET` | `/api/notificacoes` | Token | Listar notificações do usuário |
-| `GET` | `/api/notificacoes?nao_visualizadas=true` | Token | Apenas não visualizadas |
-| `PUT` | `/api/notificacoes/visualizar-todas` | Token | Marcar todas como lidas |
-| `PUT` | `/api/notificacoes/:id/visualizar` | Token | Marcar uma como lida |
-
-Notificação é criada automaticamente quando um item muda para `encontrado` ou `recuperado`.
-
-### Upload de imagem (RF14)
+#### Tags
 
 | Método | Rota | Auth | Descrição |
 |--------|------|------|-----------|
-| `POST` | `/api/upload/imagem` | Token | Enviar imagem (campo `imagem`, multipart) |
+| GET | `/api/tags` | — | Listar tags disponíveis |
 
-Retorna `{ url: "/uploads/nome-arquivo.jpg" }`. Use essa URL no campo `imagem` ao criar/editar um item.
+#### Postagens (fórum)
 
-Formatos aceitos: JPEG, PNG, WEBP, GIF (máx. 5 MB). Arquivos servidos em `/uploads/`.
+| Método | Rota | Auth | Descrição |
+|--------|------|------|-----------|
+| GET | `/api/postagens` | — | Listar fórum |
+| GET | `/api/postagens/:id` | — | Detalhe + comentários + tags |
+| POST | `/api/postagens` | Token | Criar |
+| PUT | `/api/postagens/:id` | Token | Atualizar |
+| DELETE | `/api/postagens/:id` | Token | Excluir |
+| GET | `/api/postagens/:id/comentarios` | — | Listar comentários |
+| POST | `/api/postagens/:id/comentarios` | Token | Criar comentário |
 
----
+**Filtros:** `?tipo_forum=achados|pedidos`, `?categoria=`, `?data_inicio=`, `?data_fim=`
 
-## Requisitos cobertos
+#### Comentários
 
-| Requisito | Status |
-|-----------|--------|
-| **RNF1** — E-mail único e senha forte | Implementado |
-| **RNF4** — Código de usuário por tipo (`D-`, `T-`, `S-`, `A-`) | Implementado |
-| **RNF5** — Limpeza de postagens inativas (2+ meses) | Job cron diário às 03:00 |
-| **RF1–RF5** — Cadastro e login por tipo de usuário | Implementado |
-| **RF7–RF10** — Fórum achados/pedidos, filtros e detalhe | Implementado |
-| **RF11–RF16** — CRUD de itens com categoria e filtros | Implementado |
-| **RF14** — Upload de imagem | Implementado (multer) |
-| **RF19** — Notificação de item encontrado | Implementado |
-| **RF20** — Edição de perfil | Implementado |
+| Método | Rota | Auth | Descrição |
+|--------|------|------|-----------|
+| DELETE | `/api/comentarios/:id` | Token | Excluir próprio |
 
-### Job RNF5 — Limpeza automática
+#### Notificações
 
-- Remove postagens cujo item está `encontrado` ou `recuperado` **e** sem atividade (comentários ou data da postagem) há **2+ meses**.
-- Configurável via `.env`:
-  - `LIMPEZA_MESES_INATIVIDADE=2`
-  - `LIMPEZA_CRON=0 3 * * *` (padrão: todo dia às 03:00)
+| Método | Rota | Auth | Descrição |
+|--------|------|------|-----------|
+| GET | `/api/notificacoes` | Token | Listar |
+| PUT | `/api/notificacoes/visualizar-todas` | Token | Marcar todas |
+| PUT | `/api/notificacoes/:id/visualizar` | Token | Marcar uma |
+
+#### Upload
+
+| Método | Rota | Auth | Descrição |
+|--------|------|------|-----------|
+| POST | `/api/upload/imagem` | Token | Enviar imagem (multipart) |
 
 ---
 
-## Como subir o projeto
+## ENTREGA04 — Regras de Negócio + Validações
+
+Implementadas em `utils/regrasNegocio.js` e `utils/validacoes.js`, com tratamento centralizado em `middlewares/tratarErros.js`.
+
+### Duplicidade
+
+| Regra | Validação |
+|-------|-----------|
+| E-mail único | Verificação na aplicação + `UNIQUE` no banco |
+| Matrícula única por tipo | Verificação na aplicação + `UNIQUE` no banco |
+| Categoria única | Verificação na aplicação + `UNIQUE` no banco |
+| Postagem duplicada | Um item só pode ter 1 postagem por fórum (`UNIQUE id_item + tipo_forum`) |
+
+### Campos obrigatórios
+
+| Contexto | Campos |
+|----------|--------|
+| Cadastro | nome, email, senha, tipo_usuario, matricula |
+| Docente | turma obrigatória |
+| Item | nome |
+| Postagem | titulo, tipo_forum, id_item |
+| Comentário | texto |
+| Categoria | nome |
+
+### Validações de formato
+
+- **Senha (RNF1):** mínimo 8 caracteres, maiúscula, minúscula, número e caractere especial
+- **E-mail:** formato válido
+- **Datas:** formato `AAAA-MM-DD`
+- **Período de perda:** `data_perda_inicio` ≤ `data_perda_fim`
+- **IDs:** numéricos e positivos
+- **status_item / tipo_forum:** valores permitidos no ENUM
+
+### Relacionamentos verificados
+
+- `id_categoria` deve existir antes de criar/editar item
+- `tags[]` — cada ID deve existir na tabela `tag`
+- `id_item` deve existir e pertencer ao usuário logado para criar postagem
+- Postagem/comentário/item — só o autor pode editar ou excluir
+- Categorias — CRUD restrito a administrador
+- Notificação — só o destinatário pode marcar como lida
+
+### Código de usuário (RNF4)
+
+Gerado automaticamente: `D-000001`, `T-000001`, `S-000001`, `A-000001`
+
+### Job RNF5
+
+Remove postagens de itens `encontrado`/`recuperado` sem atividade há 2+ meses.
+
+Configuração no `.env`:
+
+```env
+LIMPEZA_MESES_INATIVIDADE=2
+LIMPEZA_CRON=0 3 * * *
+```
+
+### Notificação automática (RF19)
+
+Quando item muda para `encontrado` ou `recuperado`, notificação é criada para o dono.
+
+---
+
+## Requisitos funcionais cobertos
+
+| RF | Descrição | Backend |
+|----|-----------|---------|
+| RF1–RF5 | Cadastro/login por tipo | Sim |
+| RF7–RF10 | Fórum achados/pedidos + detalhe | Sim |
+| RF11–RF16 | Itens, categorias, busca, exclusão | Sim |
+| RF14 | Upload de imagem | Sim |
+| RF19 | Notificações | Sim |
+| RF20 | Editar perfil | Sim |
+
+---
+
+## Pendências (frontend / evolução)
+
+- UC27 duplicado no documento de requisitos — renumerar
+- Interface web (fora do escopo atual)
+- Testes automatizados
+
+---
+
+## Como testar
 
 ```bash
+# 1. Banco
+mysql -u root -p < bd.sql
+
+# 2. Backend
 cd backend
-cp .env.example .env   # ajuste DB_PASSWORD e JWT_SECRET
 npm install
 npm run dev
+
+# 3. Health check
+curl http://localhost:3000/health
 ```
 
-Depois rode o `bd.sql` no MySQL.
-
-### Exemplo — upload + criar item
-
-```bash
-# 1. Enviar imagem
-curl -X POST http://localhost:3000/api/upload/imagem \
-  -H "Authorization: Bearer SEU_TOKEN" \
-  -F "imagem=@foto.jpg"
-
-# 2. Criar item com a URL retornada
-curl -X POST http://localhost:3000/api/itens \
-  -H "Authorization: Bearer SEU_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"nome":"Carteira","descricao":"Preta","imagem":"/uploads/123.jpg","id_categoria":1}'
-```
-
----
-
-## Revisão do `bd.sql` — pendências restantes
-
-| Ponto | Situação |
-|-------|----------|
-| **UC19 – Tags** | Ainda sem tabela `tag` / `item_tag` no banco |
-| **UC27 – Período de perda** | Só `data_perda DATE`; falta `data_perda_inicio` / `data_perda_fim` |
-| **UC27 duplicado** | Renumerar no documento de requisitos |
-| **`categoria`** | Tabela ok; cadastrar categorias iniciais no script SQL |
-
----
-
-## Status do servidor
-
-A API sobe em `http://localhost:3000`. O aviso de banco desconectado é esperado enquanto o MySQL não estiver configurado.
-
-Após executar o `bd.sql` e ajustar o `.env`, `GET /health` retorna:
+Resposta esperada:
 
 ```json
 { "status": "ok", "banco": "conectado" }

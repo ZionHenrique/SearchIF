@@ -5,6 +5,7 @@ const express = require('express');
 const cors = require('cors');
 const { testarConexao } = require('./database/conexao');
 const { iniciarJobLimpeza } = require('./jobs/limpezaPostagens');
+const tratarErros = require('./middlewares/tratarErros');
 const usuariosRoutes = require('./routes/usuarios');
 const itensRoutes = require('./routes/itens');
 const categoriasRoutes = require('./routes/categorias');
@@ -12,6 +13,7 @@ const postagensRoutes = require('./routes/postagens');
 const comentariosRoutes = require('./routes/comentarios');
 const notificacoesRoutes = require('./routes/notificacoes');
 const uploadRoutes = require('./routes/upload');
+const tagsRoutes = require('./routes/tags');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -36,21 +38,13 @@ app.use('/api/postagens', postagensRoutes);
 app.use('/api/comentarios', comentariosRoutes);
 app.use('/api/notificacoes', notificacoesRoutes);
 app.use('/api/upload', uploadRoutes);
+app.use('/api/tags', tagsRoutes);
 
 app.use((_req, res) => {
   res.status(404).json({ erro: 'Rota não encontrada.' });
 });
 
-app.use((erro, _req, res, _next) => {
-  if (erro instanceof Error && erro.message.includes('Formato de imagem')) {
-    return res.status(400).json({ erro: erro.message });
-  }
-  if (erro.code === 'LIMIT_FILE_SIZE') {
-    return res.status(400).json({ erro: 'Imagem excede o limite de 5 MB.' });
-  }
-  console.error('Erro não tratado:', erro);
-  res.status(500).json({ erro: 'Erro interno do servidor.' });
-});
+app.use(tratarErros);
 
 async function iniciar() {
   try {

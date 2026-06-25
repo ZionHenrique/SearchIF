@@ -1,4 +1,5 @@
 const { pool } = require('../database/conexao');
+const Tag = require('./Tag');
 
 const COLUNAS_ITEM = `
   i.id,
@@ -6,10 +7,13 @@ const COLUNAS_ITEM = `
   i.descricao,
   i.local_encontrado,
   i.data_perda,
+  i.data_perda_inicio,
+  i.data_perda_fim,
   i.imagem,
   i.status_item,
   i.id_categoria,
   i.id_usuario,
+  i.criado_em,
   c.nome AS categoria_nome,
   u.nome AS autor_nome
 `;
@@ -45,17 +49,23 @@ function montarFiltros(filtros) {
   }
 
   if (filtros.data_inicio) {
-    condicoes.push('i.data_perda >= ?');
+    condicoes.push('COALESCE(i.data_perda_inicio, i.data_perda) >= ?');
     valores.push(filtros.data_inicio);
   }
 
   if (filtros.data_fim) {
-    condicoes.push('i.data_perda <= ?');
+    condicoes.push('COALESCE(i.data_perda_fim, i.data_perda) <= ?');
     valores.push(filtros.data_fim);
   }
 
   const where = condicoes.length > 0 ? `WHERE ${condicoes.join(' AND ')}` : '';
   return { where, valores };
+}
+
+async function enriquecerComTags(item) {
+  if (!item) return null;
+  const tags = await Tag.buscarPorItem(item.id);
+  return { ...item, tags };
 }
 
 async function listar(filtros = {}) {
@@ -66,7 +76,7 @@ async function listar(filtros = {}) {
     valores
   );
 
-  return rows;
+  return Promise.all(rows.map(enriquecerComTags));
 }
 
 async function buscarPorId(id) {
@@ -74,58 +84,95 @@ async function buscarPorId(id) {
     `SELECT ${COLUNAS_ITEM} ${FROM_ITEM} WHERE i.id = ?`,
     [id]
   );
-  return rows[0] || null;
+  return enriquecerComTags(rows[0] || null);
 }
 
 async function criar(dados) {
-  const [resultado] = await pool.query(
-    `INSERT INTO item
-      (nome, descricao, local_encontrado, data_perda, imagem, status_item, id_categoria, id_usuario)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    [
-      dados.nome,
-      dados.descricao || null,
-      dados.local_encontrado || null,
-      dados.data_perda || null,
-      dados.imagem || null,
-      dados.status_item || 'perdido',
-      dados.id_categoria || null,
-      dados.id_usuario,
-    ]
-  );
+  const conexao = await pool.getConnection();
 
-  return buscarPorId(resultado.insertId);
+  try {
+    await conexao.beginTransaction();
+
+    const [resultado] = await conexao.query(
+      `INSERT INTO item
+        (nome, descricao, local_encontrado, data_perda, data_perda_inicio, data_perda_fim,
+         imagem, status_item, id_categoria, id_usuario)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        dados.nome.trim(),
+        dados.descricao || null,
+        dados.local_encontrado || null,
+        dados.data_perda || null,
+        dados.data_perda_inicio || null,
+        dados.data_perda_fim || null,
+        dados.imagem || null,
+        dados.status_item || 'perdido',
+        dados.id_categoria || null,
+        dados.id_usuario,
+      ]
+    );
+
+    const idItem = resultado.insertId;
+
+    if (dados.tags) {
+      await Tag.vincularAoItem(idItem, dados.tags, conexao);
+    }
+
+    await conexao.commit();
+    return buscarPorId(idItem);
+  } catch (erro) {
+    await conexao.rollback();
+    throw erro;
+  } finally {
+    conexao.release();
+  }
 }
 
 async function atualizar(id, dados) {
-  const campos = [];
-  const valores = [];
+  const conexao = await pool.getConnection();
 
-  const camposPermitidos = [
-    'nome',
-    'descricao',
-    'local_encontrado',
-    'data_perda',
-    'imagem',
-    'status_item',
-    'id_categoria',
-  ];
+  try {
+    await conexao.beginTransaction();
 
-  for (const campo of camposPermitidos) {
-    if (dados[campo] !== undefined) {
-      campos.push(`${campo} = ?`);
-      valores.push(dados[campo]);
+    const campos = [];
+    const valores = [];
+
+    const camposPermitidos = [
+      'nome',
+      'descricao',
+      'local_encontrado',
+      'data_perda',
+      'data_perda_inicio',
+      'data_perda_fim',
+      'imagem',
+      'status_item',
+      'id_categoria',
+    ];
+
+    for (const campo of camposPermitidos) {
+      if (dados[campo] !== undefined) {
+        campos.push(`${campo} = ?`);
+        valores.push(campo === 'nome' && dados[campo] ? dados[campo].trim() : dados[campo]);
+      }
     }
-  }
 
-  if (campos.length === 0) {
+    if (campos.length > 0) {
+      valores.push(id);
+      await conexao.query(`UPDATE item SET ${campos.join(', ')} WHERE id = ?`, valores);
+    }
+
+    if (dados.tags !== undefined) {
+      await Tag.vincularAoItem(id, dados.tags, conexao);
+    }
+
+    await conexao.commit();
     return buscarPorId(id);
+  } catch (erro) {
+    await conexao.rollback();
+    throw erro;
+  } finally {
+    conexao.release();
   }
-
-  valores.push(id);
-  await pool.query(`UPDATE item SET ${campos.join(', ')} WHERE id = ?`, valores);
-
-  return buscarPorId(id);
 }
 
 async function excluir(id) {

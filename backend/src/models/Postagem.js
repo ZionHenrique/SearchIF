@@ -12,6 +12,8 @@ const COLUNAS_POSTAGEM = `
   i.descricao AS item_descricao,
   i.local_encontrado,
   i.data_perda,
+  i.data_perda_inicio,
+  i.data_perda_fim,
   i.imagem AS item_imagem,
   i.status_item,
   i.id_categoria,
@@ -77,10 +79,18 @@ async function buscarPorId(id) {
   return rows[0] || null;
 }
 
+async function buscarPorItemETipo(idItem, tipoForum) {
+  const [rows] = await pool.query(
+    'SELECT id FROM postagem WHERE id_item = ? AND tipo_forum = ?',
+    [idItem, tipoForum]
+  );
+  return rows[0] || null;
+}
+
 async function criar(dados) {
   const [resultado] = await pool.query(
     'INSERT INTO postagem (titulo, tipo_forum, id_item, id_usuario) VALUES (?, ?, ?, ?)',
-    [dados.titulo, dados.tipo_forum, dados.id_item, dados.id_usuario]
+    [dados.titulo.trim(), dados.tipo_forum, dados.id_item, dados.id_usuario]
   );
   return buscarPorId(resultado.insertId);
 }
@@ -91,7 +101,7 @@ async function atualizar(id, dados) {
 
   if (dados.titulo !== undefined) {
     campos.push('titulo = ?');
-    valores.push(dados.titulo);
+    valores.push(dados.titulo.trim());
   }
   if (dados.tipo_forum !== undefined) {
     campos.push('tipo_forum = ?');
@@ -134,6 +144,7 @@ async function limparPostagensInativas(mesesInatividade = 2) {
 module.exports = {
   listar,
   buscarPorId,
+  buscarPorItemETipo,
   criar,
   atualizar,
   excluir,
